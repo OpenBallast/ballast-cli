@@ -1,0 +1,41 @@
+[project]
+name = "openballast"
+version = "0.1.0"
+description = "Ballast: pull a quantized knowledge corpus and ground any local model — OpenAI proxy + MCP server over a CC0 Wikidata artifact."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "OpenBallast" }]
+keywords = ["llm", "grounding", "hallucination", "mcp", "ollama", "wikidata", "rag"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "typer>=0.12",
+    "huggingface-hub>=0.23",
+    "mcp>=1.9",
+    "httpx>=0.27",
+    "starlette>=0.37",
+    "uvicorn>=0.29",
+    "zstandard>=0.22",
+]
+
+[project.urls]
+Homepage = "https://openballast.org"
+Documentation = "https://github.com/OpenBallast/ballast"
+Artifact = "https://huggingface.co/datasets/OpenBallast/ballast-t0"
+
+[project.scripts]
+ballast = "openballast.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openballast"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
