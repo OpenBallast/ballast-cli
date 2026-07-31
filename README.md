@@ -4,9 +4,11 @@ Pull a quantized knowledge corpus and ground any local model. Works with Ollama
 and every OpenAI-compatible or MCP-capable client.
 
 ```bash
-uvx openballast pull --level 3     # one-time download
-uvx openballast serve
+uvx --from git+https://github.com/OpenBallast/ballast-cli openballast pull --level 3
+uvx --from git+https://github.com/OpenBallast/ballast-cli openballast serve
 ```
+
+(PyPI package coming — it becomes just `uvx openballast`.)
 
 - **Ollama users:** point your client's base URL at `http://localhost:11435/v1`
   instead of `http://localhost:11434/v1` — done. Every chat request is grounded
@@ -15,13 +17,15 @@ uvx openballast serve
 - **MCP users** (Claude Desktop, LM Studio, Cline, Goose): add to your MCP config:
 
   ```json
-  { "ballast": { "command": "uvx", "args": ["openballast", "mcp"] } }
+  { "ballast": { "command": "uvx",
+                 "args": ["--from", "git+https://github.com/OpenBallast/ballast-cli",
+                          "openballast", "mcp"] } }
   ```
 
 - **Smoke test:**
 
   ```bash
-  uvx openballast lookup "Where was Douglas Adams born?"
+  uvx --from git+https://github.com/OpenBallast/ballast-cli openballast lookup "Where was Douglas Adams born?"
   ```
 
 ## What you're downloading
