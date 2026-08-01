@@ -105,4 +105,13 @@ def corpus_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     props.close()
     write_bucket(d / "bucket_0.sqlite", BUCKET0)
     write_bucket(d / "bucket_2.sqlite", BUCKET2)
+    for b in (0, 2):
+        fts = sqlite3.connect(d / f"fts_{b}.sqlite")
+        fts.execute("ATTACH DATABASE ? AS src", ((d / f"bucket_{b}.sqlite").as_posix(),))
+        fts.execute(
+            "CREATE VIRTUAL TABLE names_fts USING fts5(lname, qid UNINDEXED, sitelinks UNINDEXED, tokenize='unicode61')"
+        )
+        fts.execute("INSERT INTO names_fts SELECT lname, qid, sitelinks FROM src.names")
+        fts.commit()
+        fts.close()
     return d

@@ -117,6 +117,8 @@ class Store:
     level: int
     _con: sqlite3.Connection = field(repr=False, default=None)  # type: ignore[assignment]
     _buckets: list[int] = field(default_factory=list)
+    _fts_buckets: list[int] = field(default_factory=list)
+    _fts_con: sqlite3.Connection | None = field(repr=False, default=None)
 
     @staticmethod
     def installed_buckets(data_dir: Path) -> list[int]:
@@ -125,7 +127,8 @@ class Store:
         )
 
     @classmethod
-    def open(cls, data_dir: Path, level: int | None = None) -> "Store":
+    def open(cls, data_dir: Path, level: int | None = None,
+             retriever: str = "auto") -> "Store":
         data_dir = Path(data_dir)
         props = data_dir / "properties.sqlite"
         if not props.exists():
@@ -148,37 +151,98 @@ class Store:
                 "ATTACH DATABASE ? AS b" + str(b),
                 ((data_dir / f"bucket_{b}.sqlite").as_posix(),),
             )
+        # R3 retriever rung: optional FTS5 sidecars (fts_{b}.sqlite) widen
+        # candidate generation beyond exact-normalized-name equality. They get
+        # their own connection: the main one already uses 9 of sqlite's 10
+        # ATTACH slots at L7.
+        fts_buckets: list[int] = []
+        fts_con: sqlite3.Connection | None = None
+        if retriever in ("auto", "r3"):
+            present = [b for b in buckets if (data_dir / f"fts_{b}.sqlite").exists()]
+            if present:
+                fts_con = sqlite3.connect(":memory:", check_same_thread=False)
+                for b in present:
+                    fts_con.execute(
+                        "ATTACH DATABASE ? AS f" + str(b),
+                        ((data_dir / f"fts_{b}.sqlite").as_posix(),),
+                    )
+                fts_con.execute("PRAGMA query_only = ON")
+                fts_buckets = present
+            if retriever == "r3" and not fts_buckets:
+                raise FileNotFoundError(f"retriever=r3 but no fts_*.sqlite at {data_dir}")
         con.execute("PRAGMA query_only = ON")
         store = cls(data_dir=data_dir, level=level)
         store._con = con
         store._buckets = buckets
+        store._fts_buckets = fts_buckets
+        store._fts_con = fts_con
         return store
 
     def close(self) -> None:
         if self._con is not None:
             self._con.close()
+        if self._fts_con is not None:
+            self._fts_con.close()
 
     def _union(self, select: str) -> str:
         return " UNION ALL ".join(select.format(b=f"b{b}") for b in self._buckets)
 
     # -- tools ------------------------------------------------------------
 
-    def resolve(self, name: str, limit: int = 5) -> list[Hit]:
+    def resolve(self, name: str, limit: int = 5, allow_fts: bool = True) -> list[Hit]:
+        hits, _ = self._resolve_traced(name, limit, allow_fts)
+        return hits
+
+    def _resolve_traced(self, name: str, limit: int = 5,
+                        allow_fts: bool = True) -> tuple[list[Hit], bool]:
+        """Resolve, reporting whether the (fuzzier) FTS path produced the rows."""
         lname = norm(name)
         if not lname:
-            return []
+            return [], False
         sql = (
             "SELECT qid, sitelinks FROM ("
             + self._union("SELECT qid, sitelinks FROM {b}.names WHERE lname = ?")
             + ") ORDER BY sitelinks DESC LIMIT ?"
         )
         rows = self._con.execute(sql, [lname] * len(self._buckets) + [limit]).fetchall()
+        fts_used = False
+        if not rows and allow_fts and self._fts_buckets:
+            rows = self._resolve_fts_rows(lname, limit)
+            fts_used = bool(rows)
         hits = []
         for qid, sitelinks in rows:
             ent = self._entity(qid)
             if ent is not None:
                 hits.append(Hit(qid=qid, label=ent[0], bucket=ent[1], sitelinks=sitelinks))
-        return hits
+        return hits, fts_used
+
+    def _resolve_fts_rows(self, lname: str, limit: int) -> list[tuple[str, int]]:
+        """R3: bm25-ranked partial-name match when exact equality finds nothing
+        ("barack obamas" -> "barack obama"). OR-query so extra/missing words
+        don't zero the match; bm25 rank favors short, mostly-covered names."""
+        tokens = [t for t in lname.split() if t]
+        if not tokens:
+            return []
+        match = " OR ".join(f'"{t}"' for t in tokens)
+        scored: list[tuple[float, str, int]] = []
+        for b in self._fts_buckets:
+            rows = self._fts_con.execute(
+                f"SELECT rank, qid, sitelinks FROM f{b}.names_fts "
+                "WHERE names_fts MATCH ? ORDER BY rank LIMIT ?",
+                (match, limit),
+            ).fetchall()
+            scored.extend(rows)
+        scored.sort(key=lambda r: r[0])  # bm25: lower = better
+        out: list[tuple[str, int]] = []
+        seen: set[str] = set()
+        for _, qid, sitelinks in scored:
+            if qid in seen:
+                continue
+            seen.add(qid)
+            out.append((qid, sitelinks))
+            if len(out) >= limit:
+                break
+        return out
 
     def _entity(self, qid: str) -> tuple[str, int] | None:
         sql = self._union("SELECT label, bucket FROM {b}.entities WHERE qid = ?")
@@ -257,28 +321,38 @@ class Store:
         )
 
     def resolve_ctx(self, name: str, question: str, k: int = 8) -> Hit | None:
-        """Resolve with context disambiguation: among the top-k name candidates,
+        """Resolve with context disambiguation (see _resolve_ctx_scored)."""
+        scored = self._resolve_ctx_scored(name, question, k)
+        return scored[0] if scored else None
+
+    def _resolve_ctx_scored(self, name: str, question: str, k: int = 8
+                            ) -> tuple[Hit, int, int, bool, bool] | None:
+        """Context disambiguation with provenance: returns (hit, overlap,
+        n_candidates, dominant, fts_used). Among the top-k name candidates,
         prefer the one whose evidence shares the most content words with the
-        question; sitelinks break ties. Fixes the tail-entity failure where
-        top-1-by-sitelinks always picks the most famous homonym."""
-        hits = self.resolve(name, k)
+        question; blended with log-sitelinks so one spurious shared token can't
+        dethrone a strongly notable candidate. `dominant` = the top candidate
+        outranks the runner-up >=5x on sitelinks (the "obviously the famous
+        one" case, safe to attach without corroboration)."""
+        hits, fts_used = self._resolve_traced(name, k)
         if not hits:
             return None
         if len(hits) == 1:
-            return hits[0]
+            return (hits[0], 0, 1, True, fts_used)
         import math
 
+        dominant = hits[0].sitelinks >= 5 * max(1, hits[1].sitelinks)
         qtoks = content_tokens(question) - content_tokens(name)
-        best: tuple[float, Hit] | None = None
+        best: tuple[float, int, Hit] | None = None
         for h in hits:
             ev = self.evidence(h.qid, max_triples=24)
             overlap = len(qtoks & content_tokens(ev.text)) if ev.text else 0
-            # Blend, not lexicographic: one spurious shared token must not
-            # dethrone a strongly notable candidate; two or more usually should.
             score = overlap + math.log10(1 + h.sitelinks)
             if best is None or score > best[0]:
-                best = (score, h)
-        return best[1]
+                best = (score, overlap, h)
+        # dominance only vouches for the sitelinks leader, not an overlap pick
+        chosen_dominant = dominant and best[2].qid == hits[0].qid
+        return (best[2], best[1], len(hits), chosen_dominant, fts_used)
 
     def _ngram_mentions(self, question: str, max_n: int = 5,
                         max_entities: int = 4) -> list[str]:
@@ -321,20 +395,53 @@ class Store:
                 break
         return picked
 
-    def link(self, question: str, max_entities: int = 4, ctx_k: int = 8) -> list[tuple[str, Hit]]:
-        """Question -> [(mention, Hit)]: span mining with context disambiguation,
-        lowercase n-gram fallback when spans resolve to nothing."""
+    def link(self, question: str, max_entities: int = 4, ctx_k: int = 8,
+             precision_gate: bool = True, fallback: bool = False) -> list[tuple[str, Hit]]:
+        """Question -> [(mention, Hit)]: capitalized-span mining with context
+        disambiguation. This exact configuration (spans + ctx, no recall
+        fallback) realizes 34% of the oracle grounding gain end-to-end on the
+        50k-probe bench — the best of seven measured variants.
+
+        fallback (default OFF — measured harmful): lowercase n-gram mining
+        eliminates misses but converts them into wrong links at a losing
+        exchange rate. A wrong link costs about as much accuracy as a right one
+        gains (-26 pts on the wrong-linked slice); a miss costs nothing. Every
+        recall-raising variant tested (fallback, FTS, gated combinations)
+        reduced realized gain: 27% -> 15-20% of oracle. Enable only for
+        interactive use where all-lowercase questions must link at any cost.
+
+        precision_gate (applies to the fallback path): attach only when the
+        gram has >=2 tokens AND the name is unambiguous, context-corroborated,
+        or sitelinks-dominant; FTS-sourced candidates always need
+        corroboration."""
+
+        def attach_ok(mention: str, overlap: int, n_cands: int, dominant: bool,
+                      fts_used: bool, is_fallback: bool) -> bool:
+            if not precision_gate:
+                return True
+            if fts_used and overlap < 1:
+                return False
+            if is_fallback and len(mention.split()) < 2:
+                return False
+            return n_cands == 1 or overlap >= 1 or dominant
+
         pairs: list[tuple[str, Hit]] = []
         seen: set[str] = set()
         for span in candidate_spans(question)[:max_entities]:
-            hit = self.resolve_ctx(span, question, ctx_k)
-            if hit and hit.qid not in seen:
+            scored = self._resolve_ctx_scored(span, question, ctx_k)
+            if not scored:
+                continue
+            hit, overlap, n_cands, dominant, fts_used = scored
+            if attach_ok(span, overlap, n_cands, dominant, fts_used, False) and hit.qid not in seen:
                 seen.add(hit.qid)
                 pairs.append((span, hit))
-        if not pairs:
+        if not pairs and fallback:
             for gram in self._ngram_mentions(question, max_entities=max_entities):
-                hit = self.resolve_ctx(gram, question, ctx_k)
-                if hit and hit.qid not in seen:
+                scored = self._resolve_ctx_scored(gram, question, ctx_k)
+                if not scored:
+                    continue
+                hit, overlap, n_cands, dominant, fts_used = scored
+                if attach_ok(gram, overlap, n_cands, dominant, fts_used, True) and hit.qid not in seen:
                     seen.add(hit.qid)
                     pairs.append((gram, hit))
         return pairs

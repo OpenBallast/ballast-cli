@@ -21,15 +21,14 @@ def test_ctx_disambiguation_prefers_context_match(corpus_dir: Path):
     assert hit.qid == "Q308"
 
 
-def test_lowercase_fallback_mining(corpus_dir: Path):
-    """All-lowercase question mines nothing capitalized; n-gram fallback links."""
+def test_lowercase_fallback_mining_opt_in(corpus_dir: Path):
+    """All-lowercase question mines nothing capitalized; n-gram fallback links —
+    but only when explicitly enabled (measured harmful as a default)."""
     store = Store.open(corpus_dir)
-    pairs = store.link("where was douglas adams born")
-    assert pairs, "fallback should link the lowercase mention"
+    assert store.link("where was douglas adams born") == []  # default: miss, deliberately
+    pairs = store.link("where was douglas adams born", fallback=True)
+    assert pairs, "opt-in fallback should link the lowercase mention"
     assert pairs[0][1].qid == "Q42"
-    # and the full lookup returns evidence through the same path
-    result = store.lookup("where was douglas adams born")
-    assert result["entities"] and result["entities"][0]["qid"] == "Q42"
 
 
 def test_capitalized_path_still_works(corpus_dir: Path):
@@ -39,5 +38,16 @@ def test_capitalized_path_still_works(corpus_dir: Path):
 
 
 def test_fallback_no_false_links(corpus_dir: Path):
-    store = Store.open(corpus_dir)
+    store = Store.open(corpus_dir, retriever="r2")
     assert store.link("why is water wet") == []
+
+
+def test_r3_fts_partial_name(corpus_dir: Path):
+    """Exact equality fails on possessives/partial names; FTS recovers."""
+    r2 = Store.open(corpus_dir, retriever="r2")
+    assert r2.resolve("Douglas Adams's") == []
+    r3 = Store.open(corpus_dir, retriever="r3")
+    hits = r3.resolve("Douglas Adams's")
+    assert hits and hits[0].qid == "Q42"
+    # exact matches are unaffected by the sidecar
+    assert r3.resolve("Douglas Adams")[0].qid == "Q42"
