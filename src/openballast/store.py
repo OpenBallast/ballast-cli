@@ -39,9 +39,23 @@ _STOP = {
 }
 
 
+_CONTENT_STOP = frozenset(
+    """a an the of in on at to for and or nor is was are were be been being who
+    whom what when where which how why did does do done can could would should
+    shall will may might must it its this that these those with from by as not
+    no s t d ll re ve o also into over under about after before between during
+    than then there their his her they them he she you your i we our us""".split()
+)
+
+
 def norm(s: str) -> str:
     """Same normalization as the corpus name index (and the research linker)."""
     return _NORM_SPACES.sub(" ", _NORM_STRIP.sub("", s.lower())).strip()
+
+
+def content_tokens(text: str) -> set[str]:
+    """Normalized tokens minus stopwords — the disambiguation vocabulary."""
+    return {t for t in norm(text).split() if t not in _CONTENT_STOP and len(t) > 1}
 
 
 def candidate_spans(question: str) -> list[str]:
@@ -242,18 +256,96 @@ class Store:
             text=f"Facts about {label}:\n" + "\n".join(lines),
         )
 
-    def lookup(self, question: str, max_triples: int = 24, max_entities: int = 4) -> dict:
-        blocks = []
+    def resolve_ctx(self, name: str, question: str, k: int = 8) -> Hit | None:
+        """Resolve with context disambiguation: among the top-k name candidates,
+        prefer the one whose evidence shares the most content words with the
+        question; sitelinks break ties. Fixes the tail-entity failure where
+        top-1-by-sitelinks always picks the most famous homonym."""
+        hits = self.resolve(name, k)
+        if not hits:
+            return None
+        if len(hits) == 1:
+            return hits[0]
+        import math
+
+        qtoks = content_tokens(question) - content_tokens(name)
+        best: tuple[float, Hit] | None = None
+        for h in hits:
+            ev = self.evidence(h.qid, max_triples=24)
+            overlap = len(qtoks & content_tokens(ev.text)) if ev.text else 0
+            # Blend, not lexicographic: one spurious shared token must not
+            # dethrone a strongly notable candidate; two or more usually should.
+            score = overlap + math.log10(1 + h.sitelinks)
+            if best is None or score > best[0]:
+                best = (score, h)
+        return best[1]
+
+    def _ngram_mentions(self, question: str, max_n: int = 5,
+                        max_entities: int = 4) -> list[str]:
+        """Lowercase fallback miner: when capitalized-span mining yields nothing
+        (e.g. all-lowercase questions), find the longest non-overlapping word
+        n-grams that exist in the names index."""
+        toks = norm(question).split()
+        grams: dict[str, tuple[int, int]] = {}  # gram -> (start, n)
+        for n in range(min(max_n, len(toks)), 0, -1):
+            for i in range(len(toks) - n + 1):
+                window = toks[i : i + n]
+                if all(t in _CONTENT_STOP for t in window):
+                    continue
+                if n == 1 and (len(window[0]) < 3 or window[0] in _CONTENT_STOP):
+                    continue
+                grams.setdefault(" ".join(window), (i, n))
+        if not grams:
+            return []
+        existing: set[str] = set()
+        names = sorted(grams)
+        for i in range(0, len(names), 80):
+            chunk = names[i : i + 80]
+            ph = ",".join("?" * len(chunk))
+            sql = self._union(
+                "SELECT lname FROM {b}.names WHERE lname IN (" + ph + ")"
+            )
+            for (lname,) in self._con.execute(sql, chunk * len(self._buckets)):
+                existing.add(lname)
+        # greedy: longest grams first, no token overlap
+        picked: list[str] = []
+        used: set[int] = set()
+        for g in sorted(existing, key=lambda g: (-grams[g][1], grams[g][0])):
+            start, n = grams[g]
+            span = set(range(start, start + n))
+            if span & used:
+                continue
+            used |= span
+            picked.append(g)
+            if len(picked) >= max_entities:
+                break
+        return picked
+
+    def link(self, question: str, max_entities: int = 4, ctx_k: int = 8) -> list[tuple[str, Hit]]:
+        """Question -> [(mention, Hit)]: span mining with context disambiguation,
+        lowercase n-gram fallback when spans resolve to nothing."""
+        pairs: list[tuple[str, Hit]] = []
         seen: set[str] = set()
         for span in candidate_spans(question)[:max_entities]:
-            hits = self.resolve(span, 1)
-            if not hits or hits[0].qid in seen:
-                continue
-            seen.add(hits[0].qid)
-            ev = self.evidence(hits[0].qid, max_triples=max_triples)
+            hit = self.resolve_ctx(span, question, ctx_k)
+            if hit and hit.qid not in seen:
+                seen.add(hit.qid)
+                pairs.append((span, hit))
+        if not pairs:
+            for gram in self._ngram_mentions(question, max_entities=max_entities):
+                hit = self.resolve_ctx(gram, question, ctx_k)
+                if hit and hit.qid not in seen:
+                    seen.add(hit.qid)
+                    pairs.append((gram, hit))
+        return pairs
+
+    def lookup(self, question: str, max_triples: int = 24, max_entities: int = 4) -> dict:
+        blocks = []
+        for mention, hit in self.link(question, max_entities=max_entities):
+            ev = self.evidence(hit.qid, max_triples=max_triples)
             if ev.text:
                 blocks.append({
-                    "mention": span, "qid": ev.qid, "label": ev.label,
+                    "mention": mention, "qid": ev.qid, "label": ev.label,
                     "level": ev.level, "text": ev.text,
                 })
         return {"level": self.level, "entities": blocks}

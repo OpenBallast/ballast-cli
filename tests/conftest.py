@@ -47,8 +47,20 @@ BUCKET0 = {
 }
 
 BUCKET2 = {
-    "entities": [("Q691283", "St John's College", 2, 40)],
-    "names": [("st johns college", "Q691283", 40)],
+    "entities": [
+        ("Q691283", "St John's College", 2, 40),
+        # ambiguity pair: famous "Mercury" (planet, high sitelinks) vs tail
+        # "Mercury" (band member's band — low sitelinks, music context)
+        ("Q308", "Mercury", 2, 250),
+        ("Q80503", "Mercury", 2, 8),
+        ("Q15862", "Queen", 2, 150),
+    ],
+    "names": [
+        ("st johns college", "Q691283", 40),
+        ("mercury", "Q308", 250),
+        ("mercury", "Q80503", 8),
+        ("queen", "Q15862", 150),
+    ],
     "triples": [
         ("Q691283", "P17", "entity", "Q21", 2),
         ("Q691283", "P802", "entity", "Q42", 2),
@@ -56,6 +68,11 @@ BUCKET2 = {
         ("Q691283", "P361", "entity", "Q9999999", 2),
         ("Q691283", "P571", "time", "+1511-00-00T00:00:00Z|9", 2),
         ("Q691283", "P2124", "quantity", "+900|1", 2),
+        ("Q308", "P31", "string", "planet", 2),
+        ("Q308", "P361", "string", "solar system", 2),
+        ("Q80503", "P31", "string", "singer", 2),
+        ("Q80503", "P463", "entity", "Q15862", 2),
+        ("Q15862", "P31", "string", "rock band", 2),
     ],
 }
 
@@ -81,6 +98,7 @@ def corpus_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
             ("P19", "place of birth"), ("P569", "date of birth"),
             ("P106", "occupation"), ("P17", "country"), ("P802", "student"),
             ("P361", "part of"), ("P571", "inception"), ("P2124", "member count"),
+            ("P31", "instance of"), ("P463", "member of"),
         ],
     )
     props.commit()
