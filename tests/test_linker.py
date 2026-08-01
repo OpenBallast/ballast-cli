@@ -21,14 +21,13 @@ def test_ctx_disambiguation_prefers_context_match(corpus_dir: Path):
     assert hit.qid == "Q308"
 
 
-def test_lowercase_fallback_mining_opt_in(corpus_dir: Path):
-    """All-lowercase question mines nothing capitalized; n-gram fallback links —
-    but only when explicitly enabled (measured harmful as a default)."""
+def test_lowercase_fallback_mining_default(corpus_dir: Path):
+    """All-lowercase question mines nothing capitalized; n-gram fallback links
+    by default (wrong links measured ~neutral, so recall pays)."""
     store = Store.open(corpus_dir)
-    assert store.link("where was douglas adams born") == []  # default: miss, deliberately
-    pairs = store.link("where was douglas adams born", fallback=True)
-    assert pairs, "opt-in fallback should link the lowercase mention"
-    assert pairs[0][1].qid == "Q42"
+    pairs = store.link("where was douglas adams born")
+    assert pairs and pairs[0][1].qid == "Q42"
+    assert store.link("where was douglas adams born", fallback=False) == []
 
 
 def test_capitalized_path_still_works(corpus_dir: Path):

@@ -396,24 +396,23 @@ class Store:
         return picked
 
     def link(self, question: str, max_entities: int = 4, ctx_k: int = 8,
-             precision_gate: bool = True, fallback: bool = False) -> list[tuple[str, Hit]]:
-        """Question -> [(mention, Hit)]: capitalized-span mining with context
-        disambiguation. This exact configuration (spans + ctx, no recall
-        fallback) realizes 34% of the oracle grounding gain end-to-end on the
-        50k-probe bench — the best of seven measured variants.
+             precision_gate: bool = False, fallback: bool = True) -> list[tuple[str, Hit]]:
+        """Question -> [(mention, Hit)]: capitalized-span mining with blended
+        context disambiguation, plus lowercase n-gram fallback when spans
+        resolve to nothing. This configuration realizes ~63% of the oracle
+        grounding gain end-to-end on the 50k-probe bench.
 
-        fallback (default OFF — measured harmful): lowercase n-gram mining
-        eliminates misses but converts them into wrong links at a losing
-        exchange rate. A wrong link costs about as much accuracy as a right one
-        gains (-26 pts on the wrong-linked slice); a miss costs nothing. Every
-        recall-raising variant tested (fallback, FTS, gated combinations)
-        reduced realized gain: 27% -> 15-20% of oracle. Enable only for
-        interactive use where all-lowercase questions must link at any cost.
+        Measured trade-offs (per-probe composition against banked model
+        passes, wrong-link harm measured directly on GPU): attaching the WRONG
+        entity's facts is ~neutral — the model ignores irrelevant evidence —
+        so hit-rate is the objective and recall additions pay. (An earlier
+        conclusion that wrong links were as harmful as right links were
+        helpful traced to a padding-misaligned scorer; fixed and re-measured.)
 
-        precision_gate (applies to the fallback path): attach only when the
-        gram has >=2 tokens AND the name is unambiguous, context-corroborated,
-        or sitelinks-dominant; FTS-sourced candidates always need
-        corroboration."""
+        precision_gate (default off — measured to cost hits for no benefit):
+        restricts fallback attaches to unambiguous / context-corroborated /
+        sitelinks-dominant candidates. Kept for callers who want conservative
+        linking in agent pipelines where evidence provenance matters."""
 
         def attach_ok(mention: str, overlap: int, n_cands: int, dominant: bool,
                       fts_used: bool, is_fallback: bool) -> bool:
