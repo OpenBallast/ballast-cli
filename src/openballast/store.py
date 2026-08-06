@@ -249,6 +249,30 @@ class Store:
         row = self._con.execute(sql, [qid] * len(self._buckets)).fetchone()
         return (row[0], row[1]) if row else None
 
+    def _has_passages(self, bucket: int) -> bool:
+        row = self._con.execute(
+            f"SELECT 1 FROM b{bucket}.sqlite_master "
+            "WHERE type = 'table' AND name = 'passages'"
+        ).fetchone()
+        return row is not None
+
+    def _passages(self, qid: str, max_blocks: int = 24) -> str | None:
+        """Prose chunks for a passage-backed (BYO) entity; None on triple corpora."""
+        with_passages = [b for b in self._buckets if self._has_passages(b)]
+        if not with_passages:
+            return None
+        selects = " UNION ALL ".join(
+            f"SELECT chunk_idx, text FROM b{b}.passages WHERE qid = ?"
+            for b in with_passages
+        )
+        rows = self._con.execute(
+            f"SELECT chunk_idx, text FROM ({selects}) ORDER BY chunk_idx LIMIT ?",
+            [qid] * len(with_passages) + [max_blocks],
+        ).fetchall()
+        if not rows:
+            return None
+        return "\n\n".join(text for _, text in rows)
+
     def _entity_labels(self, qids: list[str]) -> dict[str, str]:
         labels: dict[str, str] = {}
         for i in range(0, len(qids), 90):
@@ -273,7 +297,8 @@ class Store:
 
     def evidence(self, id: str, max_triples: int = 32) -> Evidence:
         qid = id
-        if not re.fullmatch(r"Q\d+", id):
+        # Q… = published corpus ids; D… = built (BYO) document ids.
+        if not re.fullmatch(r"[QD]\d+", id):
             hits = self.resolve(id, 1)
             if not hits:
                 return Evidence(qid=None, level=self.level, note=f"no entity named '{id}'")
@@ -286,6 +311,13 @@ class Store:
                 note=f"entity outside level {self.level} (or unknown)",
             )
         label, _bucket = ent
+
+        passage_text = self._passages(qid, max_blocks=max_triples)
+        if passage_text is not None:
+            return Evidence(
+                qid=qid, level=self.level, label=label,
+                text=f"{label}:\n{passage_text}",
+            )
 
         sql = (
             "SELECT pid, value_type, value FROM ("

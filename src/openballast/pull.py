@@ -25,8 +25,19 @@ def ballast_home() -> Path:
     return Path.home() / ".ballast"
 
 
-def data_dir() -> Path:
-    return ballast_home() / "t0"
+def data_dir(corpus: str = "t0") -> Path:
+    return ballast_home() / corpus
+
+
+def corpora() -> list[str]:
+    """Installed corpus names (any dir under BALLAST_HOME with bucket DBs)."""
+    home = ballast_home()
+    if not home.exists():
+        return []
+    return sorted(
+        d.name for d in home.iterdir()
+        if d.is_dir() and any(d.glob("bucket_*.sqlite"))
+    )
 
 
 def _fetch(filename: str, dest: Path) -> Path:
