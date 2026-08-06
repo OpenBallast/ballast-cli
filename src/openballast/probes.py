@@ -74,8 +74,16 @@ def load_probes(source: str, limit: int | None = None,
         path = fetch_evalset(source)
     table = pq.read_table(path)
     rows = table.to_pylist()
+    seen: dict[str, int] = {}
     for r in rows:
         r["gold_aliases"] = [str(a) for a in (r.get("gold_aliases") or [])]
+        # some evalsets carry duplicate question_ids (several relations under
+        # one subject id) — uniquify so per-id joins across arms stay exact
+        q = str(r["question_id"])
+        n = seen.get(q, 0)
+        seen[q] = n + 1
+        if n:
+            r["question_id"] = f"{q}#{n + 1}"
     if limit and limit < len(rows):
         rows.sort(key=lambda r: hashlib.sha1(
             f"{seed}:{r['question_id']}".encode()).hexdigest())

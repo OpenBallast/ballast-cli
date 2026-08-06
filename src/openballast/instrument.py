@@ -111,7 +111,9 @@ def run_arm(upstream: Upstream, store: Store, probes: list[dict], arm: str,
     if not quiet:
         acc = sum(r["correct"] for r in rows) / len(rows)
         print(f"  {arm}: accuracy {acc:.4f} -> {path.name}")
-    return rows
+    # the banked parquet is the source of truth for scoring — re-read it so
+    # the summary can never disagree with what is on disk
+    return pq.read_table(path).to_pylist()
 
 
 def run_eval(upstream: Upstream, store: Store, evalset: str, limit: int,
