@@ -1,6 +1,6 @@
 # ballast
 
-Pull a quantized knowledge corpus — or build one from your own documents — and
+Pull a quantized knowledge corpus, or build one from your own documents, and
 ground any local model. Works with Ollama and every OpenAI-compatible or
 MCP-capable client. Includes model profiling and a three-arm grounding
 benchmark, all CPU-only.
@@ -13,7 +13,7 @@ uvx openballast serve
 (Live on PyPI: `pip install openballast` also works.)
 
 - **Ollama users:** point your client's base URL at `http://localhost:11435/v1`
-  instead of `http://localhost:11434/v1` — done. Every chat request is grounded
+  instead of `http://localhost:11434/v1`. Done. Every chat request is grounded
   with corpus facts before your model sees it. No tool calling needed, works
   with any model size.
 - **MCP users** (Claude Desktop, LM Studio, Cline, Goose): add to your MCP config:
@@ -31,7 +31,7 @@ uvx openballast serve
 ## What you're downloading
 
 [Ballast T0](https://huggingface.co/datasets/OpenBallast/ballast-t0): 25.4M
-entities and 197M facts from Wikidata (CC0), quantized into nested levels — pick
+entities and 197M facts from Wikidata (CC0), quantized into nested levels. Pick
 your knowledge size like you pick a GGUF quant:
 
 | level | download | on disk | contains |
@@ -46,7 +46,7 @@ your knowledge size like you pick a GGUF quant:
 | L7 | 2.2 GB | 9.2 GB | everything |
 
 Levels are nested: `pull --level 5` after `pull --level 3` downloads only the
-new buckets. Everything runs offline after the pull — no network at answer time.
+new buckets. Everything runs offline after the pull: no network at answer time.
 
 Measured effect (details: [thesis](https://github.com/OpenBallast/ballast)):
 a 2B model + ~180 MB of ballast exceeds a 12B model's factual accuracy;
@@ -92,7 +92,7 @@ ballast profile -m qwen3:8b --limit 2000 --budget 2GB
 
 Probes the model ungrounded against the public evalset, reports its accuracy
 per corpus region (head → tail), fits a grounding competence profile
-(`.gcp.json`), and — given a byte budget — recommends the corpus level where
+(`.gcp.json`), and (given a byte budget) recommends the corpus level where
 grounding still buys accuracy for THIS model. The profile carries a
 reliability AUC against a 0.58 gate; below the gate the recommendation falls
 back to the generic ordering.
@@ -105,16 +105,16 @@ ballast eval -m qwen3:8b --limit 500
 
 Every probe is asked three ways: ungrounded (U), with realized retrieval (R),
 and with oracle-entity evidence (S). The report is the delivery ratio
-(R − U) / (S − U) — the fraction of the reachable knowledge gap today's
-retrieval closes — plus coverage-conditional splits. Arms checkpoint to
+(R − U) / (S − U), the fraction of the reachable knowledge gap today's
+retrieval closes, plus coverage-conditional splits. Arms checkpoint to
 parquet and resume after interruption.
 
 ## How it works
 
 `serve` intercepts `POST /v1/chat/completions`, mines entity mentions from your
 last message, resolves them against the local corpus (normalized label/alias
-match), and prepends the matching facts as a system message. Everything else —
-including streaming — passes through untouched. The MCP server exposes the same
+match), and prepends the matching facts as a system message. Everything else,
+including streaming, passes through untouched. The MCP server exposes the same
 three tools (`resolve`, `evidence`, `lookup`) as the hosted demo endpoint
 ([mcp.openballast.org](https://mcp.openballast.org)).
 

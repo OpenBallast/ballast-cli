@@ -1,7 +1,7 @@
 [project]
 name = "openballast"
 version = "0.3.0"
-description = "Ballast: pull a quantized knowledge corpus (or build your own) and ground any local model — OpenAI proxy, MCP server, model profiling, and a three-arm grounding benchmark."
+description = "Ballast: pull a quantized knowledge corpus (or build your own) and ground any local model. OpenAI proxy, MCP server, model profiling, and a three-arm grounding benchmark."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
