@@ -32,7 +32,10 @@ from .store import Store
 from .upstream import Upstream
 
 ARMS = ("ungrounded", "realized", "saturated")
-MAX_EVIDENCE_BYTES = 2048
+# 4096 matches the measured evidence-pack budget and fits whole passage
+# blocks; blocks are atomic (skipped, never truncated) so a smaller budget
+# silently zeroes prose-corpus evidence.
+MAX_EVIDENCE_BYTES = 4096
 
 _SHOTS_PLAIN = (
     "Q: What is the capital of France?\nA: Paris\n\n"

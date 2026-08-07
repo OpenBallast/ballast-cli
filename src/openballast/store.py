@@ -256,22 +256,41 @@ class Store:
         ).fetchone()
         return row is not None
 
-    def _passages(self, qid: str, max_blocks: int = 24) -> str | None:
-        """Prose chunks for a passage-backed (BYO) entity; None on triple corpora."""
+    MAX_PASSAGE_BYTES = 4096
+
+    def _passages(self, qid: str, max_blocks: int = 24,
+                  max_bytes: int | None = None) -> str | None:
+        """Prose chunks for a passage-backed entity; None on triple corpora.
+
+        Chunks are atomic: the block is the document prefix that fits the
+        byte budget (4096 B by default — the measured evidence-pack size),
+        whole chunks only, never truncated mid-chunk.
+        """
+        budget = max_bytes or self.MAX_PASSAGE_BYTES
         with_passages = [b for b in self._buckets if self._has_passages(b)]
         if not with_passages:
             return None
         selects = " UNION ALL ".join(
-            f"SELECT chunk_idx, text FROM b{b}.passages WHERE qid = ?"
+            f"SELECT chunk_idx, text FROM b{b}.passages WHERE qid = ? AND bucket <= ?"
             for b in with_passages
         )
         rows = self._con.execute(
             f"SELECT chunk_idx, text FROM ({selects}) ORDER BY chunk_idx LIMIT ?",
-            [qid] * len(with_passages) + [max_blocks],
+            [qid, self.level] * len(with_passages) + [max_blocks],
         ).fetchall()
         if not rows:
             return None
-        return "\n\n".join(text for _, text in rows)
+        blocks: list[str] = []
+        used = 0
+        for _, text in rows:
+            cost = len(text.encode()) + (2 if blocks else 0)
+            if used + cost > budget:
+                break
+            blocks.append(text)
+            used += cost
+        if not blocks:  # first chunk alone exceeds the budget: keep it whole
+            blocks = [rows[0][1]]
+        return "\n\n".join(blocks)
 
     def _entity_labels(self, qids: list[str]) -> dict[str, str]:
         labels: dict[str, str] = {}

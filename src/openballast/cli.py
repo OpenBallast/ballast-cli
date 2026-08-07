@@ -18,12 +18,16 @@ app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
 @app.command()
 def pull(
     level: int = typer.Option(3, "--level", "-l", min=0, max=MAX_BUCKET,
-                              help="corpus level L0 (54 MB) .. L7 (full)"),
+                              help="corpus level L0 .. L7 (nested; sizes print before download)"),
+    tier: str = typer.Option("t0", "--tier", "-t",
+                             help="t0 = Wikidata facts, t1 = Wikipedia passages, t2 = OpenStax passages"),
 ):
-    """Download the serving corpus from Hugging Face (nested — only new buckets fetch)."""
-    typer.echo(f"pulling Ballast T0 up to L{level} -> {data_dir()}")
-    do_pull(level)
-    typer.echo(f"done. installed level: L{installed_level()}")
+    """Download a serving corpus from Hugging Face (nested — only new buckets fetch)."""
+    typer.echo(f"pulling Ballast {tier.upper()} up to L{level} -> {data_dir(tier)}")
+    do_pull(level, tier=tier)
+    typer.echo(f"done. installed level: L{installed_level(data_dir(tier))}")
+    if tier != "t0":
+        typer.echo(f"serve it with: ballast serve --corpus {tier}")
 
 
 @app.command()

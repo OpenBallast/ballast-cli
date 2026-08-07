@@ -74,3 +74,35 @@ def test_build_end_to_end_lookup(docs_dir: Path, tmp_path: Path):
     assert any("citric acid" in b["text"] for b in result["entities"])
     hits = store.resolve("water filter")
     assert hits and store.evidence(hits[0].qid).text
+
+
+def test_passage_evidence_respects_byte_budget(tmp_path: Path):
+    src = tmp_path / "docs"
+    src.mkdir()
+    # ~40 chunks of ~1 KB each — far past the 4096-byte evidence budget
+    (src / "manual.txt").write_text(
+        "\n\n".join(f"Chunk {i}: " + ("lorem " * 160) for i in range(40)),
+        encoding="utf-8",
+    )
+    out = tmp_path / "corpus"
+    build(src, name="manual", out=out, quiet=True)
+    store = Store.open(out)
+    ev = store.evidence("manual")
+    body = ev.text.split(":\n", 1)[1]
+    assert len(body.encode()) <= Store.MAX_PASSAGE_BYTES
+    assert body.startswith("Chunk 0")  # document prefix, whole chunks
+    assert "Chunk 39" not in body
+
+
+def test_tier_repo_mapping():
+    from openballast.pull import TIER_REPOS, data_dir
+
+    assert TIER_REPOS["t1"].endswith("ballast-t1")
+    assert TIER_REPOS["t2"].endswith("ballast-t2")
+    assert data_dir("t1").name == "t1"
+    import pytest as _pytest
+
+    from openballast.pull import pull as do_pull
+
+    with _pytest.raises(ValueError):
+        do_pull(0, tier="t9", quiet=True)
