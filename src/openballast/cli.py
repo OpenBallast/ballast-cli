@@ -18,7 +18,7 @@ app = typer.Typer(no_args_is_help=True, add_completion=False, help=__doc__)
 @app.command()
 def pull(
     level: int = typer.Option(3, "--level", "-l", min=0, max=MAX_BUCKET,
-                              help="corpus level L0 (36 MB) .. L7 (full)"),
+                              help="corpus level L0 (54 MB) .. L7 (full)"),
 ):
     """Download the serving corpus from Hugging Face (nested — only new buckets fetch)."""
     typer.echo(f"pulling Ballast T0 up to L{level} -> {data_dir()}")
@@ -47,7 +47,7 @@ def build(
 
 @app.command()
 def profile(
-    model: str = typer.Option(..., "--model", "-m", help="upstream model name (e.g. qwen3:8b)"),
+    model: str = typer.Option(..., "--model", "-m", help="upstream model name (e.g. qwen3.5:9b)"),
     upstream: str = typer.Option("http://localhost:11434", help="OpenAI-compatible upstream"),
     evalset: str = typer.Option("matrix", help="evalset name or local probes parquet"),
     limit: int = typer.Option(2000, help="probe sample size"),

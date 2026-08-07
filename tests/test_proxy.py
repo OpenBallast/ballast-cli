@@ -21,6 +21,8 @@ def test_ground_injects_system_message(corpus_dir: Path):
     assert out["messages"][0]["role"] == "system"
     assert "Facts about Douglas Adams" in out["messages"][0]["content"]
     assert "Cambridge" in out["messages"][0]["content"]
+    # the answerability warn line ships with every grounded request
+    assert "say so plainly instead" in out["messages"][0]["content"]
     assert out["messages"][1] == body["messages"][0]
     # original body untouched
     assert body["messages"][0]["role"] == "user"
