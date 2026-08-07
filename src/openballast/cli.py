@@ -1,4 +1,4 @@
-"""ballast — pull a quantized knowledge corpus, ground any local model."""
+"""ballast: pull a quantized knowledge corpus, ground any local model."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def pull(
     tier: str = typer.Option("t0", "--tier", "-t",
                              help="t0 = Wikidata facts, t1 = Wikipedia passages, t2 = OpenStax passages"),
 ):
-    """Download a serving corpus from Hugging Face (nested — only new buckets fetch)."""
+    """Download a serving corpus from Hugging Face (nested, only new buckets fetch)."""
     typer.echo(f"pulling Ballast {tier.upper()} up to L{level} -> {data_dir(tier)}")
     do_pull(level, tier=tier)
     typer.echo(f"done. installed level: L{installed_level(data_dir(tier))}")
@@ -55,7 +55,7 @@ def profile(
     upstream: str = typer.Option("http://localhost:11434", help="OpenAI-compatible upstream"),
     evalset: str = typer.Option("matrix", help="evalset name or local probes parquet"),
     limit: int = typer.Option(2000, help="probe sample size"),
-    budget: Optional[str] = typer.Option(None, help="corpus byte budget, e.g. 2GB — emits a level recommendation"),
+    budget: Optional[str] = typer.Option(None, help="corpus byte budget, e.g. 2GB, emits a level recommendation"),
     corpus: str = typer.Option("t0", "--corpus", help="installed corpus to profile against"),
     level: Optional[int] = typer.Option(None, "--level", "-l"),
     out: Optional[Path] = typer.Option(None, help="output .gcp.json path"),
@@ -99,7 +99,7 @@ def eval(
     """Run the three-arm instrument: ungrounded / realized / saturated.
 
     Reports the knowledge-limited band (S - U) and the delivery ratio
-    (R - U) / (S - U) — the fraction of the reachable gap retrieval closes.
+    (R - U) / (S - U): the fraction of the reachable gap retrieval closes.
     Interrupted runs resume; finished arms are never re-queried.
     """
     from .instrument import run_eval
@@ -163,7 +163,7 @@ def mcp(
     level: Optional[int] = typer.Option(None, "--level", "-l", help="cap the corpus level"),
     corpus: str = typer.Option("t0", "--corpus", help="corpus name (t0 or a built one)"),
 ):
-    """MCP server on stdio — for Claude Desktop / LM Studio / Cline configs."""
+    """MCP server on stdio, for Claude Desktop / LM Studio / Cline configs."""
     from . import mcp_server
 
     mcp_server.run_stdio(level=level, dir=data_dir(corpus))
@@ -176,7 +176,7 @@ def status():
 
     names = corpora()
     if not names:
-        typer.echo(f"no corpora under {ballast_home()} — run `ballast pull` or `ballast build`")
+        typer.echo(f"no corpora under {ballast_home()}, run `ballast pull` or `ballast build`")
         raise typer.Exit(1)
     for name in names:
         d = data_dir(name)
